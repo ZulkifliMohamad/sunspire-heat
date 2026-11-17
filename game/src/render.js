@@ -1,141 +1,352 @@
-// Drawing only: the world's state and the current screen in, pixels out. The 1280x720 playfield
-// is scaled to fit the window and centred, the margin filled with the backdrop colour. Flat
-// rectangles and circles, canvas text for the HUD and the panels. Text that holds a number is
-// rebuilt only when the number changes, so a frame allocates nothing.
-import { FIELD, FONT, LIVES, PALETTE } from './config.js';
-import { KIND_COIN } from './world.js';
+// Drawing only: the Three.js scene, camera and every mesh, driven by the
+// world state. The city is built once from the layout; cars, people, police
+// and markers are pooled meshes updated from state each frame. No rules here.
+import * as THREE from 'three';
+import { CITY, PALETTE } from './config.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_OVER = 'over';
+export const SCREEN_COMPLETE = 'complete';
 
-/** The panel's width; its height grows with its lines: room for the title, the lines and the prompt. */
-const PANEL = { width: 600, top: 134, line: 34, bottom: 70 };
-const LIFE_SIZE = 20;
-const LIFE_GAP = 8;
-
-function cachedLabel(prefix) {
-  let value = -1;
-  let text = '';
-  return function label(next) {
-    if (next !== value) {
-      value = next;
-      text = prefix + next;
-    }
-    return text;
-  };
+function windowTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 64, 128);
+  ctx.fillStyle = '#1d3247';
+  for (let y = 8; y < 120; y += 16) {
+    for (let x = 6; x < 58; x += 14) ctx.fillRect(x, y, 9, 10);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  return tex;
 }
 
-export function createRenderer(canvas) {
-  const context = canvas.getContext('2d');
-  const view = { scale: 1, x: 0, y: 0 };
-  const scoreLabel = cachedLabel('Score ');
-  const levelLabel = cachedLabel('Level ');
-  const finalLabel = cachedLabel('Score ');
-  const bestLabel = cachedLabel('Best ');
+function makeCarMesh(color, isPolice) {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.35 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x1d3247, roughness: 0.15, metalness: 0.6 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.62, 4.1), bodyMat);
+  body.position.y = 0.55;
+  group.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.55, 2.1), glassMat);
+  cabin.position.set(0, 1.1, -0.2);
+  group.add(cabin);
+  const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.3, 12);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.9 });
+  for (const [x, z] of [[-0.85, 1.35], [0.85, 1.35], [-0.85, -1.35], [0.85, -1.35]]) {
+    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(x, 0.34, z);
+    group.add(wheel);
+  }
+  if (isPolice) {
+    const barMat = new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xff2222, emissiveIntensity: 1 });
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.18, 0.4), barMat);
+    bar.position.set(0, 1.5, -0.2);
+    bar.name = 'lightbar';
+    group.add(bar);
+  }
+  return group;
+}
+
+function makePersonMesh(color) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 1.05, 10), mat);
+  body.position.y = 0.85;
+  group.add(body);
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.24, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xd9a986, roughness: 0.7 }),
+  );
+  head.position.y = 1.62;
+  group.add(head);
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.55, 0.24), new THREE.MeshStandardMaterial({ color: 0x2b2b33 }));
+  legs.position.y = 0.28;
+  group.add(legs);
+  return group;
+}
+
+export function createRenderer(canvas, city) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(PALETTE.skyHorizon);
+  scene.fog = new THREE.Fog(0xffd9a0, 150, 520);
+
+  const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 900);
+  const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x8a7f6a, 0.9);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(PALETTE.sun, 2.4);
+  sun.position.set(120, 180, 60);
+  scene.add(sun);
+
+  // Ground, roads and sidewalks.
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(CITY.bound * 2 + 120, CITY.bound * 2 + 120),
+    new THREE.MeshStandardMaterial({ color: PALETTE.ground, roughness: 1 }),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  scene.add(ground);
+  const roadMat = new THREE.MeshStandardMaterial({ color: PALETTE.road, roughness: 0.95 });
+  const lineMat = new THREE.MeshBasicMaterial({ color: PALETTE.roadLine });
+  for (const s of CITY.streets) {
+    for (const horizontal of [true, false]) {
+      const road = new THREE.Mesh(new THREE.PlaneGeometry(CITY.bound * 2 + 40, CITY.roadHalf * 2), roadMat);
+      road.rotation.x = -Math.PI / 2;
+      if (horizontal) road.rotation.z = Math.PI / 2;
+      road.position.set(horizontal ? 0 : s, 0.02, horizontal ? s : 0);
+      scene.add(road);
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(CITY.bound * 2 + 40, 0.28), lineMat);
+      line.rotation.x = -Math.PI / 2;
+      if (horizontal) line.rotation.z = Math.PI / 2;
+      line.position.set(horizontal ? 0 : s, 0.04, horizontal ? s : 0);
+      scene.add(line);
+    }
+  }
+  // Water at the marina (south edge).
+  const water = new THREE.Mesh(
+    new THREE.PlaneGeometry(260, 60),
+    new THREE.MeshStandardMaterial({ color: PALETTE.water, roughness: 0.25, metalness: 0.4 }),
+  );
+  water.rotation.x = -Math.PI / 2;
+  water.position.set(0, 0.03, CITY.bound + 40);
+  scene.add(water);
+
+  // Buildings with a shared window texture.
+  const winTex = windowTexture();
+  for (const b of city.buildings) {
+    const tex = winTex.clone();
+    tex.needsUpdate = true;
+    tex.repeat.set(Math.max(1, Math.round(b.w / 9)), Math.max(1, Math.round(b.h / 9)));
+    const mat = new THREE.MeshStandardMaterial({ color: b.color, map: tex, roughness: 0.85 });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d), mat);
+    mesh.position.set(b.x, b.h / 2, b.z);
+    scene.add(mesh);
+    if (b.roof) {
+      const roof = new THREE.Mesh(
+        new THREE.BoxGeometry(b.w * 0.5, 2.2, b.d * 0.5),
+        new THREE.MeshStandardMaterial({ color: 0x5a5148, roughness: 1 }),
+      );
+      roof.position.set(b.x, b.h + 1.1, b.z);
+      scene.add(roof);
+    }
+  }
+  // Parks and plaza.
+  for (const park of city.parks) {
+    const mat = new THREE.MeshStandardMaterial({ color: park.kind === 'plaza' ? 0xcbb894 : 0x6f9e5a, roughness: 1 });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(park.w, park.d), mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(park.x, 0.05, park.z);
+    scene.add(mesh);
+  }
+  // Lamps and palms.
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0x333338, roughness: 0.6 });
+  const palmMat = new THREE.MeshStandardMaterial({ color: 0x3f7a3a, roughness: 1 });
+  for (const prop of city.props) {
+    if (prop.kind === 'lamp') {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 5.4, 8), lampMat);
+      pole.position.set(prop.x, 2.7, prop.z);
+      scene.add(pole);
+      const bulb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 8, 6),
+        new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xffd76e, emissiveIntensity: 0.8 }),
+      );
+      bulb.position.set(prop.x, 5.5, prop.z);
+      scene.add(bulb);
+    } else {
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 3.4, 8), new THREE.MeshStandardMaterial({ color: 0x7a5a38 }));
+      trunk.position.set(prop.x, 1.7, prop.z);
+      scene.add(trunk);
+      const top = new THREE.Mesh(new THREE.SphereGeometry(1.5, 8, 6), palmMat);
+      top.scale.y = 0.55;
+      top.position.set(prop.x, 3.8, prop.z);
+      scene.add(top);
+    }
+  }
+
+  // Mission marker beacon + checkpoint rings.
+  const beacon = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.6, 2.6, 60, 20, 1, true),
+    new THREE.MeshBasicMaterial({ color: PALETTE.marker, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  scene.add(beacon);
+  const beaconRing = new THREE.Mesh(
+    new THREE.RingGeometry(3.4, 4.6, 32),
+    new THREE.MeshBasicMaterial({ color: PALETTE.marker, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
+  );
+  beaconRing.rotation.x = -Math.PI / 2;
+  beaconRing.position.y = 0.08;
+  scene.add(beaconRing);
+  const ringGeo = new THREE.TorusGeometry(5, 0.35, 10, 32);
+  const ringMat = new THREE.MeshBasicMaterial({ color: PALETTE.marker });
+  const checkpointRing = new THREE.Mesh(ringGeo, ringMat);
+  checkpointRing.rotation.x = Math.PI / 2;
+  scene.add(checkpointRing);
+
+  // Tracer line for shots.
+  const tracerGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, 1)]);
+  const tracer = new THREE.Line(tracerGeo, new THREE.LineBasicMaterial({ color: 0xffe27a }));
+  tracer.visible = false;
+  scene.add(tracer);
+
+  // Pooled meshes for cars, people and enemies.
+  const carMeshes = new Map();
+  const personMeshes = new Map();
+  const playerMesh = makePersonMesh(PALETTE.player);
+  scene.add(playerMesh);
+
+  function carMeshFor(car) {
+    let mesh = carMeshes.get(car.id);
+    if (!mesh) {
+      mesh = makeCarMesh(car.color, car.kind === 'police');
+      scene.add(mesh);
+      carMeshes.set(car.id, mesh);
+    }
+    return mesh;
+  }
+
+  function personMeshFor(key, color) {
+    let mesh = personMeshes.get(key);
+    if (!mesh) {
+      mesh = makePersonMesh(color);
+      scene.add(mesh);
+      personMeshes.set(key, mesh);
+    }
+    return mesh;
+  }
 
   function resize() {
-    const ratio = window.devicePixelRatio || 1;
-    const width = Math.round(window.innerWidth * ratio);
-    const height = Math.round(window.innerHeight * ratio);
-    canvas.width = width;
-    canvas.height = height;
-    view.scale = Math.min(width / FIELD.width, height / FIELD.height);
-    view.x = (width - FIELD.width * view.scale) / 2;
-    view.y = (height - FIELD.height * view.scale) / 2;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
   }
-
-  const fonts = new Map();
-  function text(value, x, y, size, color, align) {
-    if (!fonts.has(size)) fonts.set(size, `${size}px ${FONT}`);
-    context.font = fonts.get(size);
-    context.fillStyle = color;
-    context.textAlign = align;
-    context.fillText(value, x, y);
-  }
-
-  function drawField(state) {
-    context.fillStyle = PALETTE.sky;
-    context.fillRect(0, 0, FIELD.width, FIELD.height);
-    context.fillStyle = PALETTE.ground;
-    context.fillRect(0, FIELD.groundY, FIELD.width, FIELD.height - FIELD.groundY);
-
-    const items = state.items;
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      if (item.kind === KIND_COIN) {
-        context.fillStyle = PALETTE.coin;
-        context.beginPath();
-        context.arc(item.x + item.width / 2, item.y + item.height / 2, item.width / 2, 0, Math.PI * 2);
-        context.fill();
-      } else {
-        context.fillStyle = PALETTE.block;
-        context.fillRect(item.x, item.y, item.width, item.height);
-      }
-    }
-
-    const player = state.player;
-    // Blink while invulnerable after a hit: hidden on every other tenth of a second.
-    if (player.invulnerable === 0 || Math.floor(player.invulnerable * 10) % 2 === 1) {
-      context.fillStyle = PALETTE.player;
-      context.fillRect(player.x, player.y, player.width, player.height);
-    }
-  }
-
-  function drawHud(state) {
-    context.textBaseline = 'top';
-    text(scoreLabel(state.score), 24, 20, 28, PALETTE.text, 'left');
-    text(levelLabel(state.level), FIELD.width / 2, 20, 28, PALETTE.text, 'center');
-    const firstLife = FIELD.width - 24 - LIVES * (LIFE_SIZE + LIFE_GAP) + LIFE_GAP;
-    text('Lives', firstLife - 12, 20, 28, PALETTE.text, 'right');
-    for (let life = 0; life < LIVES; life += 1) {
-      context.fillStyle = life < state.lives ? PALETTE.player : PALETTE.ground;
-      context.fillRect(firstLife + life * (LIFE_SIZE + LIFE_GAP), 24, LIFE_SIZE, LIFE_SIZE);
-    }
-  }
-
-  function drawPanel(title, lines, prompt) {
-    const height = PANEL.top + lines.length * PANEL.line + PANEL.bottom;
-    const x = (FIELD.width - PANEL.width) / 2;
-    const y = (FIELD.height - height) / 2;
-    context.fillStyle = PALETTE.panel;
-    context.fillRect(x, y, PANEL.width, height);
-    context.textBaseline = 'alphabetic';
-    text(title, FIELD.width / 2, y + 78, 48, PALETTE.text, 'center');
-    for (let index = 0; index < lines.length; index += 1) {
-      text(lines[index], FIELD.width / 2, y + PANEL.top + index * PANEL.line, 22, PALETTE.muted, 'center');
-    }
-    text(prompt, FIELD.width / 2, y + height - 40, 24, PALETTE.coin, 'center');
-  }
-
-  const TITLE_LINES = ['Dodge the red blocks. Catch the gold coins.', 'Move with ← → or A D.  Pause with P.', ''];
-  const PAUSED_LINES = ['The blocks will wait for you.'];
-  const OVER_LINES = ['', ''];
-
-  /** Paint one frame: the field, then the HUD or a panel for the screen the game is on. */
-  function draw(state, screen, best) {
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.fillStyle = PALETTE.backdrop;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
-    drawField(state);
-    if (screen === SCREEN_TITLE) {
-      TITLE_LINES[2] = bestLabel(best);
-      drawPanel('Block Dodger', TITLE_LINES, 'Press Space or click to start');
-      return;
-    }
-    drawHud(state);
-    if (screen === SCREEN_PAUSED) drawPanel('Paused', PAUSED_LINES, 'Press P to resume');
-    else if (screen === SCREEN_OVER) {
-      OVER_LINES[0] = finalLabel(state.score);
-      OVER_LINES[1] = bestLabel(best);
-      drawPanel('Game over', OVER_LINES, 'Press Space or click to play again');
-    }
-  }
-
   resize();
   window.addEventListener('resize', resize);
+
+  const camPos = new THREE.Vector3();
+  const lookAt = new THREE.Vector3();
+
+  /** Paint one frame from the world state. `snap` jumps the camera to its
+   *  target at once (screenshot staging); otherwise it eases toward it. */
+  function draw(state, screen, snap) {
+    const player = state.player;
+    const cam = state.camera;
+    const time = state.time;
+
+    // Cars.
+    const seenCars = new Set();
+    for (const car of state.cars) {
+      const mesh = carMeshFor(car);
+      mesh.visible = true;
+      mesh.position.set(car.x, 0, car.z);
+      mesh.rotation.y = car.heading;
+      seenCars.add(car.id);
+      if (car.kind === 'police') {
+        const bar = mesh.getObjectByName('lightbar');
+        if (bar) {
+          const on = Math.floor(time * 5) % 2 === 0;
+          bar.material.color.setHex(on ? 0xff2222 : 0x2244ff);
+          bar.material.emissive.setHex(on ? 0xff2222 : 0x2244ff);
+        }
+      }
+    }
+    for (const [id, mesh] of carMeshes) if (!seenCars.has(id)) mesh.visible = false;
+
+    // Player.
+    if (player.inCar !== null) {
+      playerMesh.visible = false;
+    } else {
+      playerMesh.visible = true;
+      playerMesh.position.set(player.x, player.y, player.z);
+      playerMesh.rotation.y = player.heading;
+      const bob = Math.abs(player.speed) > 0.5 ? Math.sin(time * 12) * 0.06 : 0;
+      playerMesh.position.y = player.y + bob;
+    }
+
+    // Pedestrians and enemies.
+    const seenPeople = new Set();
+    state.peds.forEach((ped, i) => {
+      const key = `ped${i}`;
+      const mesh = personMeshFor(key, ped.color);
+      mesh.visible = true;
+      mesh.position.set(ped.x, Math.sin(ped.walkPhase) * 0.05, ped.z);
+      mesh.rotation.y = ped.heading;
+      seenPeople.add(key);
+    });
+    state.enemies.forEach((enemy, i) => {
+      const key = `enemy${i}`;
+      const mesh = personMeshFor(key, 0x8a1f1f);
+      mesh.visible = enemy.alive;
+      mesh.position.set(enemy.x, 0, enemy.z);
+      mesh.rotation.y = enemy.heading;
+      seenPeople.add(key);
+    });
+    for (const [key, mesh] of personMeshes) if (!seenPeople.has(key)) mesh.visible = false;
+
+    // Marker beacon and checkpoint ring.
+    const marker = state.missions.marker;
+    beacon.visible = !!marker;
+    beaconRing.visible = !!marker;
+    if (marker) {
+      beacon.position.set(marker.x, 30, marker.z);
+      beaconRing.position.set(marker.x, 0.08, marker.z);
+      const pulse = 1 + Math.sin(time * 4) * 0.12;
+      beaconRing.scale.set(pulse, pulse, 1);
+    }
+    const showRing =
+      state.missions.active &&
+      state.missions.checkpoints.length > 0 &&
+      state.missions.checkpoint < state.missions.checkpoints.length;
+    checkpointRing.visible = !!showRing;
+    if (showRing) {
+      const cp = state.missions.checkpoints[state.missions.checkpoint];
+      checkpointRing.position.set(cp.x, 2.2, cp.z);
+      checkpointRing.rotation.z = time * 0.8;
+    }
+
+    // Shot tracer.
+    if (state.combat.tracerTimer > 0 && state.combat.tracer) {
+      const t = state.combat.tracer;
+      const positions = tracer.geometry.attributes.position;
+      positions.setXYZ(0, t.x, 1.4, t.z);
+      positions.setXYZ(1, t.x + Math.sin(t.angle) * t.dist, 1.4, t.z + Math.cos(t.angle) * t.dist);
+      positions.needsUpdate = true;
+      tracer.visible = true;
+    } else {
+      tracer.visible = false;
+    }
+
+    // Camera.
+    if (screen === SCREEN_TITLE) {
+      const angle = time * 0.07;
+      camPos.set(Math.sin(angle) * 160, 78, Math.cos(angle) * 160);
+      lookAt.set(0, 12, 0);
+    } else {
+      const focus = player.inCar !== null && state.cars[player.inCar]
+        ? state.cars[player.inCar]
+        : player;
+      const dist = player.inCar !== null ? 11 : 8.5;
+      const height = 3.2 + cam.pitch * 7;
+      camPos.set(
+        focus.x - Math.sin(cam.yaw) * dist,
+        height,
+        focus.z - Math.cos(cam.yaw) * dist,
+      );
+      lookAt.set(focus.x + Math.sin(cam.yaw) * 6, 1.6, focus.z + Math.cos(cam.yaw) * 6);
+    }
+    camera.position.copy(snap ? camPos : camera.position.lerp(camPos, 0.35));
+    camera.lookAt(lookAt);
+    renderer.render(scene, camera);
+  }
+
   return { draw };
 }
