@@ -67,4 +67,4 @@ The four screenshots are staged deterministically, never edited: each `?shot=` s
 mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-Entered on [make.fun](https://make.fun/?ref=6ksyay6h&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards.
+Entered on [make.fun](https://make.fun/?ref=s7t6ezhz&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards.
