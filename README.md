@@ -15,7 +15,8 @@ No part of this game copies any existing commercial game: the city, characters, 
 - Police who spawn at the city edge, chase, ram, and bust you on foot when the heat is high.
 - Four missions with objectives, timers and payouts ($500 / $800 / $1,200 / $2,500), plus free roam after the story ends.
 - Combat on foot with a hitscan pistol, rival gang members who shoot back, health that regens out of combat.
-- A save in localStorage: cash, mission progress and best stats persist between visits.
+- Taxi fares: a waiting pedestrian waves by the roadside (green ring on the ground, green dot on the minimap) — slow down to pick them up, then reach the orange ring before the timer runs out to earn $50 plus distance pay.
+- A save in localStorage: cash, mission progress, taxi fares earned and best stats persist between visits.
 
 ## Controls
 
@@ -24,6 +25,7 @@ No part of this game copies any existing commercial game: the city, characters, 
 | W A S D / arrows | Move on foot, drive (W accelerate, S brake / reverse, A D steer) |
 | Mouse | Orbit the third-person camera (click to lock the pointer) |
 | E | Enter / exit a car — near a parked car, this steals it (+1 wanted star) |
+| Drive slowly (< 10 m/s) past a green-ring pedestrian | Pick up a taxi fare — reach the orange ring before the timer runs out |
 | Space | Jump on foot, handbrake while driving |
 | Left click | Shoot (on foot) |
 | M | Mute / unmute sound |
@@ -43,7 +45,7 @@ Then open http://localhost:8080 in desktop Chrome. No build step, no install.
 ## Layout
 
 - `game/` — the game: `index.html` + `src/` modules (one job per file) + vendored Three.js 0.187.0 under `game/vendor/three/`
-- `game/src/` — `config.js` tuning, `random.js` seeded RNG, `city.js` layout, `traffic.js` cars + pedestrians, `vehicles.js` car physics + stealing, `player.js` on-foot controller, `police.js` wanted level + chase AI, `missions.js` story + objectives, `combat.js` shooting + enemies, `hud.js` HUD + minimap, `audio.js` synthesised sound, `save.js` localStorage, `shots.js` staged screenshots, `render.js` Three.js scene, `world.js` state machine, `input.js` keyboard + mouse, `main.js` boot + fixed-step loop
+- `game/src/` — `config.js` tuning, `random.js` seeded RNG, `city.js` layout, `traffic.js` cars + pedestrians, `vehicles.js` car physics + stealing, `player.js` on-foot controller, `police.js` wanted level + chase AI, `missions.js` story + objectives, `combat.js` shooting + enemies, `taxi.js` taxi fares, `hud.js` HUD + minimap, `audio.js` synthesised sound, `save.js` localStorage, `shots.js` staged screenshots, `render.js` Three.js scene, `world.js` state machine, `input.js` keyboard + mouse, `main.js` boot + fixed-step loop
 - `screenshots/` — 4 staged screenshots of the game itself (see below)
 - `shots.json` — the staging map: `?shot=start|play|mission|end&seed=1`
 - `main.ts` — builds the make.fun dossier into the output directory (fails fast unless there are 3–4 screenshots)
@@ -57,7 +59,7 @@ The four screenshots are staged deterministically, never edited: each `?shot=` s
 - `1-start.jpg` — title screen over the living city
 - `2-play.jpg` — driving chase: wanted stars, minimap and mission objective in one frame
 - `3-mission.jpg` — on-foot plaza shootout with the mission beacon
-- `4-end.jpg` — all missions complete, stats, parked on the beach road by the marina
+- `4-end.jpg` — all missions complete, stats, Rook standing beside the red car on the beach road by the marina with traffic and pedestrians in frame
 
 ## Build the dossier
 

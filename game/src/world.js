@@ -10,6 +10,7 @@ import { checkPedHit, spawnTraffic, stepTraffic } from './traffic.js';
 import { addWanted, createPolice, stepPolice } from './police.js';
 import { createCombat, crimeForShot, fireShot, stepCombat } from './combat.js';
 import { beginStory, createMissions, stepMissions } from './missions.js';
+import { cancelTaxiFare, createTaxi, stepTaxi } from './taxi.js';
 import { WANTED } from './config.js';
 
 export const EVENT_OVER = 1;
@@ -17,6 +18,8 @@ export const EVENT_BUSTED = 2;
 export const EVENT_MISSION = 4;
 export const EVENT_STEAL = 8;
 export const EVENT_SHOT = 16;
+export const EVENT_TAXI_PICKUP = 32;
+export const EVENT_TAXI_DONE = 64;
 
 /** A frame of input, built by main.js each step. */
 export function blankFrame() {
@@ -46,10 +49,11 @@ export function createWorld(random) {
     police: createPolice(),
     combat: createCombat(),
     missions: createMissions(),
+    taxi: createTaxi(),
     cash: 0,
     bestCash: 0,
     nearestCar: null,
-    stats: { carsStolen: 0, shotsFired: 0, shotsHit: 0, kills: 0, missionsDone: 0, distance: 0 },
+    stats: { carsStolen: 0, shotsFired: 0, shotsHit: 0, kills: 0, missionsDone: 0, distance: 0, taxiFares: 0, taxiEarned: 0 },
   };
 
   function reset() {
@@ -72,9 +76,10 @@ export function createWorld(random) {
     state.police = createPolice();
     state.combat = createCombat();
     state.missions = createMissions();
+    state.taxi = createTaxi();
     state.cash = 0;
     state.nearestCar = null;
-    state.stats = { carsStolen: 0, shotsFired: 0, shotsHit: 0, kills: 0, missionsDone: 0, distance: 0 };
+    state.stats = { carsStolen: 0, shotsFired: 0, shotsHit: 0, kills: 0, missionsDone: 0, distance: 0, taxiFares: 0, taxiEarned: 0 };
     beginStory(state);
   }
 
@@ -129,7 +134,13 @@ export function createWorld(random) {
     if (frame.interact) {
       const result = tryEnterExit(state, state.nearestCar);
       if (result === 'steal') events |= EVENT_STEAL;
+      if (result === 'exit') cancelTaxiFare(state);
     }
+
+    // Taxi fares run on their own loop, independent of the story missions.
+    const taxiEvent = stepTaxi(state, dt);
+    if (taxiEvent === 'pickup') events |= EVENT_TAXI_PICKUP;
+    if (taxiEvent === 'done') events |= EVENT_TAXI_DONE;
 
     // Shooting (on foot only).
     if (frame.shooting && player.inCar === null) {

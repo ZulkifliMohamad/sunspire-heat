@@ -87,6 +87,30 @@ export function createHud() {
       ctx.closePath();
       ctx.fill();
     }
+    // Taxi: waiting hailer (green dot) and dropoff (orange diamond).
+    const taxi = state.taxi;
+    if (taxi && taxi.hailer && !taxi.active) {
+      const [x, y] = toMap(taxi.hailer.x, taxi.hailer.z);
+      ctx.fillStyle = '#3aa655';
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#e8f5e9';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    if (taxi && taxi.active) {
+      const [x, y] = toMap(taxi.active.x, taxi.active.z);
+      const pulse = 5 + Math.sin(state.time * 5) * 2;
+      ctx.fillStyle = '#ff9f1c';
+      ctx.beginPath();
+      ctx.moveTo(x, y - pulse);
+      ctx.lineTo(x + pulse, y);
+      ctx.lineTo(x, y + pulse);
+      ctx.lineTo(x - pulse, y);
+      ctx.closePath();
+      ctx.fill();
+    }
     // Police (blue/red dots).
     for (const car of state.policeCars) {
       const [x, y] = toMap(car.x, car.z);
@@ -143,16 +167,30 @@ export function createHud() {
         ? 'All missions complete'
         : 'Sunspire';
     els.objective.textContent = objectiveText(state);
+    // A running fare is the objective that matters: fare, dropoff, time left.
+    if (state.taxi && state.taxi.active) {
+      const fare = state.taxi.active;
+      els.objective.textContent = `Taxi fare $${fare.fare} — reach the orange ring, ${Math.max(0, Math.ceil(fare.timer))}s left`;
+    }
     const banner = state.missions.bannerTimer > 0 ? state.missions.banner : '';
     els.banner.textContent = banner;
     els.banner.style.opacity = banner ? '1' : '0';
     // Context prompt ("E — Steal car", ...).
     let prompt = '';
     if (screen === SCREEN_PLAY) {
-      if (player.inCar !== null) prompt = 'E — Exit car · Space — Handbrake';
-      else if (state.nearestCar) prompt = 'E — Steal car';
-      else if (state.missions.active && MISSIONS[state.missions.index].kind === 'heist' && state.missions.stage === 1) prompt = 'Walk to the bank door to grab the cash';
-      else prompt = 'WASD — Move · Mouse — Camera · LMB — Shoot';
+      if (player.inCar !== null && state.taxi && state.taxi.hailer && !state.taxi.active) {
+        const hailer = state.taxi.hailer;
+        const car = state.cars[player.inCar];
+        if (car && Math.hypot(car.x - hailer.x, car.z - hailer.z) < 30) {
+          prompt = 'Slow down near the green marker to pick up a taxi fare';
+        }
+      }
+      if (!prompt) {
+        if (player.inCar !== null) prompt = 'E — Exit car · Space — Handbrake';
+        else if (state.nearestCar) prompt = 'E — Steal car';
+        else if (state.missions.active && MISSIONS[state.missions.index].kind === 'heist' && state.missions.stage === 1) prompt = 'Walk to the bank door to grab the cash';
+        else prompt = 'WASD — Move · Mouse — Camera · LMB — Shoot';
+      }
     }
     els.prompt.textContent = prompt;
     els.crosshair.style.display = screen === SCREEN_PLAY && player.inCar === null ? 'block' : 'none';

@@ -96,16 +96,21 @@ export function createRenderer(canvas, city) {
   scene.add(ground);
   const roadMat = new THREE.MeshStandardMaterial({ color: PALETTE.road, roughness: 0.95 });
   const lineMat = new THREE.MeshBasicMaterial({ color: PALETTE.roadLine });
+  // One road plane per street, both directions. The plane starts flat
+  // (420 m along X, 11 m along Z); a north-south street needs the extra
+  // quarter turn so its length runs along Z instead. The turn and the
+  // position belong to the same branch — mixing them piles every road
+  // onto the two centre streets and leaves the rest of the grid dirt.
   for (const s of CITY.streets) {
     for (const horizontal of [true, false]) {
       const road = new THREE.Mesh(new THREE.PlaneGeometry(CITY.bound * 2 + 40, CITY.roadHalf * 2), roadMat);
       road.rotation.x = -Math.PI / 2;
-      if (horizontal) road.rotation.z = Math.PI / 2;
+      if (!horizontal) road.rotation.z = Math.PI / 2;
       road.position.set(horizontal ? 0 : s, 0.02, horizontal ? s : 0);
       scene.add(road);
       const line = new THREE.Mesh(new THREE.PlaneGeometry(CITY.bound * 2 + 40, 0.28), lineMat);
       line.rotation.x = -Math.PI / 2;
-      if (horizontal) line.rotation.z = Math.PI / 2;
+      if (!horizontal) line.rotation.z = Math.PI / 2;
       line.position.set(horizontal ? 0 : s, 0.04, horizontal ? s : 0);
       scene.add(line);
     }
@@ -189,6 +194,21 @@ export function createRenderer(canvas, city) {
   const checkpointRing = new THREE.Mesh(ringGeo, ringMat);
   checkpointRing.rotation.x = Math.PI / 2;
   scene.add(checkpointRing);
+
+  // Taxi rings: green ground ring for a waiting hailer, orange ring for a dropoff.
+  const hailerRing = new THREE.Mesh(
+    new THREE.RingGeometry(1.6, 2.4, 32),
+    new THREE.MeshBasicMaterial({ color: 0x3aa655, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
+  );
+  hailerRing.rotation.x = -Math.PI / 2;
+  hailerRing.position.y = 0.08;
+  scene.add(hailerRing);
+  const taxiRing = new THREE.Mesh(
+    new THREE.TorusGeometry(5, 0.35, 10, 32),
+    new THREE.MeshBasicMaterial({ color: 0xff9f1c }),
+  );
+  taxiRing.rotation.x = Math.PI / 2;
+  scene.add(taxiRing);
 
   // Tracer line for shots.
   const tracerGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, 1)]);
@@ -313,6 +333,20 @@ export function createRenderer(canvas, city) {
       checkpointRing.rotation.z = time * 0.8;
     }
 
+    // Taxi rings: hailer waiting on the sidewalk, dropoff ring when a fare runs.
+    const taxi = state.taxi;
+    hailerRing.visible = !!(taxi && taxi.hailer && !taxi.active);
+    if (hailerRing.visible) {
+      hailerRing.position.set(taxi.hailer.x, 0.08, taxi.hailer.z);
+      const pulse = 1 + Math.sin(time * 4) * 0.15;
+      hailerRing.scale.set(pulse, pulse, 1);
+    }
+    taxiRing.visible = !!(taxi && taxi.active);
+    if (taxiRing.visible) {
+      taxiRing.position.set(taxi.active.x, 2.2, taxi.active.z);
+      taxiRing.rotation.z = time * 0.8;
+    }
+
     // Shot tracer.
     if (state.combat.tracerTimer > 0 && state.combat.tracer) {
       const t = state.combat.tracer;
@@ -327,8 +361,9 @@ export function createRenderer(canvas, city) {
 
     // Camera.
     if (screen === SCREEN_TITLE) {
+      // Tight orbit so the city reads big and sun-soaked behind the title.
       const angle = time * 0.07;
-      camPos.set(Math.sin(angle) * 160, 78, Math.cos(angle) * 160);
+      camPos.set(Math.sin(angle) * 120, 55, Math.cos(angle) * 120);
       lookAt.set(0, 12, 0);
     } else {
       const focus = player.inCar !== null && state.cars[player.inCar]

@@ -23,6 +23,8 @@ export function writeSave(state) {
         missionsDone: state.stats.missionsDone,
         carsStolen: state.stats.carsStolen,
         kills: state.stats.kills,
+        taxiFares: state.stats.taxiFares,
+        taxiEarned: state.stats.taxiEarned,
         bestCash: state.bestCash,
         savedAt: Date.now(),
       }),
@@ -37,4 +39,6 @@ export function applySave(state, data) {
   state.cash = typeof data.cash === 'number' ? data.cash : 0;
   state.missions.cash = state.cash;
   state.bestCash = typeof data.bestCash === 'number' ? data.bestCash : 0;
+  state.stats.taxiFares = typeof data.taxiFares === 'number' ? data.taxiFares : 0;
+  state.stats.taxiEarned = typeof data.taxiEarned === 'number' ? data.taxiEarned : 0;
 }

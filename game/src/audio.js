@@ -129,6 +129,13 @@ export const sfx = {
   steal(audio) {
     blip(audio, 330, 0.15, 'square', 0.15, 660);
   },
+  pickup(audio) {
+    blip(audio, 660, 0.12, 'sine', 0.2);
+    setTimeout(() => blip(audio, 880, 0.16, 'sine', 0.2), 100);
+  },
+  fare(audio) {
+    [784, 988, 1175].forEach((f, i) => setTimeout(() => blip(audio, f, 0.18, 'triangle', 0.22), i * 100));
+  },
 };
 
 /** Per-frame audio: engine pitch, siren, and a slow sunset bassline. */

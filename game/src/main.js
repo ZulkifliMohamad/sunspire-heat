@@ -6,7 +6,7 @@
 // sets window.__shotReady for a screenshot.
 import { STEP } from './config.js';
 import { createRandom } from './random.js';
-import { blankFrame, createWorld, EVENT_BUSTED, EVENT_MISSION, EVENT_OVER, EVENT_SHOT, EVENT_STEAL } from './world.js';
+import { blankFrame, createWorld, EVENT_BUSTED, EVENT_MISSION, EVENT_OVER, EVENT_SHOT, EVENT_STEAL, EVENT_TAXI_DONE, EVENT_TAXI_PICKUP } from './world.js';
 import { ACTION_CONFIRM, ACTION_INTERACT, ACTION_MUTE, ACTION_PAUSE, createInput } from './input.js';
 import { createRenderer, SCREEN_COMPLETE, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 import { createHud } from './hud.js';
@@ -123,6 +123,11 @@ function runGame() {
     if (events & EVENT_STEAL) {
       sfx.steal(audio);
       hud.showToast('Car stolen — the heat is on.');
+    }
+    if (events & EVENT_TAXI_PICKUP) sfx.pickup(audio);
+    if (events & EVENT_TAXI_DONE) {
+      sfx.fare(audio);
+      writeSave(world.state);
     }
     if (events & EVENT_SHOT) sfx.gunshot(audio);
     if (events & EVENT_MISSION) {
